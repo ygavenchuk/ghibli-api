@@ -1,0 +1,46 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C middleware
+*.c
+
+# C extensions
+*.so
+
+# redundant c++ files generated from *.pyx
+_*.cpp
+
+#  Usually these files are written by a python script from a template
+#  before PyInstaller builds the exe, so as to inject date/other infos into it.
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*,cover
+.hypothesis/
+
+# IDE's settings
+.idea/
+
+# build artifacts
+build/
+.eggs/
+gh_films.egg-info/
+
+# project specific ingores
+gh_films/settings/local.py
+*.sqlite3
+celerybeat*

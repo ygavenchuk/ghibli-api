@@ -1,0 +1,24 @@
+<html>
+  <head>
+      <title>Ghibli studio movies</title>
+       <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
+             integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+  </head>
+  <body>
+        <table class="table">
+            <thead class="thead-light">
+                <tr>
+                    <th scope="col">Movie</th><th scope="col">People</th>
+                </tr>
+            </thead>
+            <tbody>{% for film in films %}
+                <tr>
+                    <td>{{ film.title }}</td>
+                    <td><p>{% for person in film.people.all %}
+                        {{ person.name }}{% if not forloop.last %}, {% endif %}{% endfor %}<p>
+                    </td>
+                </tr>{% endfor %}
+            </tbody>
+        </table>
+  </body>
+</html>
