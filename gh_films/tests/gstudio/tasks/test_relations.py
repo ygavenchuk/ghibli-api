@@ -50,13 +50,6 @@ _fx_relations = (
             ]},
         ],
 
-        # minimal required films data (record's ids) from DB
-        {"78d74675-c365-441e-9fb1-fe2f9188bde4": [],
-         "9411138d-306b-48fe-8cc6-54316d82f6a7": []},
-
-        # minimal required poeple data (record's ids) from DB
-        {"78d74675-c365-441e-9fb1-fe1f9188bde4": None, },
-
         # expected film_id:people_id pairs
         {
             ("78d74675-c365-441e-9fb1-fe2f9188bde4",
@@ -83,10 +76,10 @@ class TestRelations(TestCase):
 
     @unpack
     @data(*_fx_relations)
-    def test_new_relations_should_be_saved(self, d_api, films, peoples, exp):
-        api = MagicMock(people=d_api)
-        update_relations(api, films, peoples)
+    def test_new_relations_should_be_saved(self, api_data, expected):
+        api = MagicMock(people=api_data)
+        update_relations(api)
 
         relations_qs = Films.people.through.objects.all()
         result = {(str(r.films_id), str(r.people_id)) for r in relations_qs}
-        self.assertSequenceEqual(exp, result)
+        self.assertSequenceEqual(expected, result)

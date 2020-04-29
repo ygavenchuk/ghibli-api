@@ -20,11 +20,25 @@ class Gender(Enum):
         return str(self.value)
 
 
+class GenderField(CharField):
+    def __init__(self, *args, **kwargs):
+        kwargs["max_length"] = 7
+        kwargs["choices"] = [(g.name, g.value) for g in Gender]
+        super().__init__(*args, **kwargs)
+
+    def to_python(self, value):
+        try:
+            gender = Gender(value)
+        except (TypeError, ValueError):
+            gender = Gender.UNKNOWN
+
+        return str(gender)
+
+
 class People(Model):
     id = UUIDField(primary_key=True)
     name = CharField(max_length=128)
-    gender = CharField(max_length=7, choices=[
-        (g.name, g.value) for g in Gender])
+    gender = GenderField()
     age = CharField(max_length=64, blank=True)
     eye_color = CharField(max_length=64)
     hair_color = CharField(max_length=64)

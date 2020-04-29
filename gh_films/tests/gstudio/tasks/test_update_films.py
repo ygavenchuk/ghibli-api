@@ -1,10 +1,8 @@
-from unittest.mock import MagicMock
-
 from django.test import TestCase
 from ddt import ddt, data, unpack
 
 from gh_films.pkg.gstudio.models import Films
-from gh_films.pkg.gstudio.tasks import update_films
+from gh_films.pkg.gstudio.tasks import update
 
 
 __all__ = ["TestUpdateFilms"]
@@ -98,8 +96,7 @@ class TestUpdateFilms(TestCase):
     @unpack
     @data(*_fx_valid_films)
     def test_valid_items_should_be_saved(self, api_data, expected_ids):
-        api = MagicMock(films=api_data)
-        update_films(api)
+        update(Films, api_data)
 
         saved_films_qs = Films.objects.filter(pk__in=expected_ids)
         self.assertEqual(len(expected_ids), saved_films_qs.count())
@@ -108,9 +105,8 @@ class TestUpdateFilms(TestCase):
     @unpack
     @data(*_fx_valid_films_for_update)
     def test_saved_items_should_be_unchanged(self, api_data, stored, expected):
-        api = MagicMock(films=api_data)
         Films.objects.create(**stored)
-        update_films(api)
+        update(Films, api_data)
 
         saved_films_qs = Films.objects.filter(pk__in=expected)
         self.assertEqual(len(expected), saved_films_qs.count())

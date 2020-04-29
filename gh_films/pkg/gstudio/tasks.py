@@ -1,12 +1,13 @@
-from typing import Union, Dict
+from typing import Union, Dict, Type, List
 
 from django.core.exceptions import ValidationError
+from django.db import transaction, Error
 from django.db.models.expressions import BaseExpression
 from celery import shared_task
 from celery.utils.log import get_task_logger
 
 from gh_films.pkg.gstudio.ghibli_api import GhibliApi
-from gh_films.pkg.gstudio.models import People, Films, Gender
+from gh_films.pkg.gstudio.models import People, Films
 
 
 __all__ = ["update_movies", ]
@@ -15,140 +16,81 @@ __all__ = ["update_movies", ]
 _logger = get_task_logger(__name__)
 
 
-def update_people(gh_api: GhibliApi) -> Union[None, Dict[str, People]]:
+def _populate_fields(model: Union[Type[Films], Type[People]],
+                     api_data: Dict[str, str]) -> Union[Films, People, None]:
     """
-    Stores new information about people into local storage (DB)
+    Returns new model's instance which fields are populated by data from api
 
-    :param gh_api:
+    :param model:
+    :param api_data:
 
-    :return: sequence of `People` instances that have been saved into DB
+    :return:
     """
-    d_people = {}
-    for person in gh_api.people:
-        d_people[person["id"]] = person
+    instance_data = {}
+    for field in model._meta.get_fields():
+        if not field.is_relation:
+            instance_data[field.name] = api_data.get(field.name)
 
-    if not d_people:
-        _logger.info("No people received.")
+    try:
+        return model(**instance_data)
+    except ValidationError as err:
+        _logger.warning(f'Can\'t store {str(model._meta.verbose_name)} '
+                        f'#{api_data["id"]} due to error: "{str(err)}')
+
+
+def update(model: Union[Type[Films], Type[People]],
+           api_data: List[Dict[str, str]]) -> None:
+    """
+    Inserts new records into given model
+
+    :param model: model class to update records
+    :param api_data:
+
+    :return:
+    """
+    model_name = model._meta.verbose_name
+    if not api_data:
+        _logger.info(f"No {model_name} received.")
         return
 
-    people_qs = People.objects.filter(id__in=d_people.keys()).only("id")
-    known_people_ids = {str(item.pk) for item in people_qs}
-
-    batch = {}
-    for person in d_people.values():
-        if person["id"] in known_people_ids:
-            continue
-
-        try:
-            gender = Gender(person.get("gender"))
-        except (TypeError, ValueError):
-            gender = Gender.UNKNOWN
-
-        try:
-            batch[person["id"]] = People(id=person["id"], name=person["name"],
-                                         gender=gender, age=person["age"],
-                                         eye_color=person["eye_color"],
-                                         hair_color=person["hair_color"])
-        except (IndexError, KeyError, ValidationError) as err:
-            _logger.warning(f'Can\'t store person #{person["id"]} due to '
-                            f'error: "{str(err)}')
+    batch = []
+    for api_record in api_data:
+        db_instance = _populate_fields(model, api_record)
+        if db_instance:
+            batch.append(db_instance)
 
     try:
-        # the "ignore_conflicts" option doesn't work properly for all engines
-        # e.g. OracleDB
-        People.objects.bulk_create(batch.values(), ignore_conflicts=True)
-    except BaseExpression as err:
-        _logger.warning(f"Can't update people records due to \"{str(err)}\"")
-        return None
-
-    return batch
+        model.objects.bulk_create(batch, ignore_conflicts=True)
+    except (BaseExpression, Error, ) as err:
+        _logger.warning(f"Can't update {model_name} records due to "
+                        f"\"{str(err)}\"")
 
 
-def update_films(gh_api: GhibliApi) -> Union[None, Dict[str, Films]]:
-    """
-    Stores new information about films into local storage (DB)
-
-    :param gh_api:
-
-    :return: sequence of `Films` instances that have been saved into DB
-    """
-    d_film = {}
-    for film in gh_api.films:
-        d_film[film["id"]] = film
-
-    film_qs = Films.objects.filter(id__in=d_film.keys()).only("id")
-    known_films = {str(film.id) for film in film_qs}
-
-    batch = {}
-    for film in d_film.values():
-        if film["id"] in known_films:
-            continue
-
-        try:
-            batch[film["id"]] = Films(id=film["id"], title=film["title"],
-                                      description=film["description"],
-                                      director=film["director"],
-                                      producer=film["producer"],
-                                      release_date=int(film["release_date"]),
-                                      rt_score=int(film["rt_score"]))
-        except (TypeError, IndexError, KeyError, ValidationError) as err:
-            _logger.warning(f'Can\'t store film #{film["id"]} because of '
-                            f'error: "{str(err)}')
-
-    try:
-        # todo: add fallback mode
-        # the "ignore_conflicts" option doesn't work properly for all engines
-        # e.g. OracleDB
-        Films.objects.bulk_create(batch.values(), ignore_conflicts=True)
-    except BaseExpression as err:
-        _logger.warning(f"Can't update films records due to \"{str(err)}\"")
-        return None
-
-    return batch
-
-
-def update_relations(api: GhibliApi, films: Dict[str, Films],
-                     people: Dict[str, People]):
+def update_relations(api: GhibliApi) -> None:
     """
     Actualize many-to-many relations between films and people
 
     :param api:
-    :param films:
-    :param people:
     """
     batch = []
 
-    api_film_people_ids = set()
+    film_ids = set()
+
     for person in api.people:
         person_id = person["id"]
-        film_ids = person["films"]
-        for film_id in film_ids:
-            api_film_people_ids.add((film_id, person_id))
-
-    new_film_ids = set(films.keys())
-    new_people_ids = set(people.keys())
-    for film_id, people_id in api_film_people_ids:
-        if film_id in new_film_ids or people_id in new_people_ids:
+        for film_id in person["films"]:
+            film_ids.add(film_id)
             batch.append(Films.people.through(films_id=film_id,
-                                              people_id=people_id))
-
-    if not batch:
-        return
-
-    # fixme
-    # there's a special case: the API's data has no new "people" and/or "films"
-    # records but relations are changed. This case can be solved in scope of
-    # tracking modifications of any data received from API.
-    # Note, that properly way to solve this case requires usage temporary
-    # tables or "select from values". It means usage of raw sql queries without
-    # involving django's ORM
+                                              people_id=person_id))
 
     try:
-        Films.people.through.objects.bulk_create(batch, ignore_conflicts=True)
-    except BaseExpression as err:
+        with transaction.atomic():
+            Films.people.through.objects.filter(films_id__in=film_ids).delete()
+            Films.people.through.objects.bulk_create(batch,
+                                                     ignore_conflicts=True)
+    except (BaseExpression, Error, ) as err:
         _logger.warning(f"Can't update films-people relations due to "
                         f"\"{str(err)}\"")
-        pass
 
 
 @shared_task
@@ -162,8 +104,9 @@ def update_movies() -> Dict[str, int]:
     # This function can't track changes in already saved records due to
     # limitations of public Ghibli API
     api = GhibliApi(_logger)
-    people = update_people(api)
-    films = update_films(api)
-    update_relations(api, films, people)
+    update(People, api.people)
+    update(Films, api.films)
+    update_relations(api)
 
-    return {"people": len(people), "films": len(films)}
+    return {"people": len(api.people) if api.people else 0,
+            "films": len(api.films) if api.films else 0}
